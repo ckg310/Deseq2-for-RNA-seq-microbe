@@ -1,0 +1,44 @@
+suppressPackageStartupMessages({
+  library(DESeq2)
+  library(dplyr)
+  library(tibble)
+})
+
+ICE_START <- 5899896
+ICE_END   <- 6401770
+
+ann_file <- "DESeq2_results_annotated_Mesorhizobium_ICEdesc_geneNameReplaced.csv"
+out_file <- "ICE_genes_all_noSignificanceFilter.csv"
+
+stopifnot(file.exists(ann_file))
+stopifnot(exists("dds"))
+
+# 1) DESeq2 results (no filtering)
+res_df <- as.data.frame(results(dds, contrast = c("condition","minSymICE","R7A"))) %>%
+  rownames_to_column("gene_id") %>%
+  mutate(gene_id = as.character(gene_id))
+
+# 2) Annotation (only needed columns)
+ann_keep <- read.csv(ann_file, stringsAsFactors = FALSE, check.names = FALSE) %>%
+  transmute(
+    gene_id    = as.character(gene_id),
+    gene_name  = as.character(gene_name),
+    gene_start = suppressWarnings(as.numeric(gene_start)),
+    gene_end   = suppressWarnings(as.numeric(gene_end)),
+    gene_strand = if ("gene_strand" %in% names(.)) as.character(gene_strand) else NA_character_,
+    gene_chr    = if ("gene_chr" %in% names(.)) as.character(gene_chr) else NA_character_
+  ) %>%
+  distinct(gene_id, .keep_all = TRUE)
+
+# 3) Join + ICE coordinate filter ONLY
+ice_all <- res_df %>%
+  left_join(ann_keep, by = "gene_id") %>%
+  filter(
+    !is.na(gene_start), !is.na(gene_end),
+    gene_end >= ICE_START,
+    gene_start <= ICE_END
+  )
+
+cat("Genes in ICE region (no sig filter):", nrow(ice_all), "\n")
+write.csv(ice_all, out_file, row.names = FALSE)
+cat("Saved:", out_file, "\n")
