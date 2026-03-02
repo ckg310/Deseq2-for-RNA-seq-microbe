@@ -1,0 +1,108 @@
+DESeq2 pipeline starting from:
+Raw counts file (CSV)
+Two conditions
+4 replicates each
+Output: full DE table + volcano plot
+
+Expected Input Format
+📁 counts.csv
+
+Must look like this:
+gene_id	R7A_1	R7A_2	R7A_3	R7A_4	minSym_1	minSym_2	minSym_3	minSym_4
+First column = gene IDs
+Remaining columns = raw counts (integers only)
+No FPKM, no TPM
+
+Load Required Libraries: 
+
+install.packages(c("tidyverse","ggrepel"))
+BiocManager::install("DESeq2")
+
+library(DESeq2)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(tibble)
+
+Import Raw Counts:
+
+counts <- read.csv("counts.csv", row.names = 1, check.names = FALSE)
+
+# Check dimensions
+dim(counts)
+head(counts)
+
+Create Metadata (coldata):
+
+This must match column names exactly.
+
+coldata <- data.frame(
+  row.names = colnames(counts),
+  condition = c(
+    rep("R7A", 4),
+    rep("minSym", 4)
+  )
+)
+
+coldata$condition <- factor(coldata$condition,
+                            levels = c("R7A","minSym"))  # R7A as reference
+
+coldata
+
+Build DESeq2 Object:
+
+dds <- DESeqDataSetFromMatrix(
+  countData = counts,
+  colData   = coldata,
+  design    = ~ condition
+)
+
+Optional: Prefilter Low Count Genes (Recommended):
+
+Removes noise.
+
+dds <- dds[rowSums(counts(dds)) > 10, ]
+
+Run DESeq2:
+dds <- DESeq(dds)
+
+Extract Results (minSym vs R7A):
+
+res <- results(dds, contrast = c("condition","minSym","R7A"))
+
+Interpretation:
+
+log2FoldChange > 0 → Up in minSym
+
+log2FoldChange < 0 → Down in minSym
+
+Convert to Data frame:
+
+res_df <- as.data.frame(res) %>%
+  rownames_to_column("gene_id") %>%
+  mutate(
+    padj_plot = ifelse(is.na(padj), NA,
+                       ifelse(padj == 0, 1e-300, padj)),
+    neglog10padj = -log10(padj_plot)
+  )
+
+Count Significant genes:
+
+sig_genes <- res_df %>%
+  filter(!is.na(padj) & padj < 0.05)
+
+up_genes <- sig_genes %>%
+  filter(log2FoldChange > 0)
+
+down_genes <- sig_genes %>%
+  filter(log2FoldChange < 0)
+
+cat("Total significant:", nrow(sig_genes), "\n")
+cat("Up in minSym:", nrow(up_genes), "\n")
+cat("Down in minSym:", nrow(down_genes), "\n")
+
+Save result:
+
+write.csv(res_df,
+          "DESeq2_results_minSym_vs_R7A.csv",
+          row.names = FALSE)
