@@ -1,0 +1,46 @@
+Add Significance Classification: 
+res_df <- res_df %>%
+  mutate(
+    sig_class = case_when(
+      !is.na(padj) & padj < 0.05 & log2FoldChange > 0  ~ "Up",
+      !is.na(padj) & padj < 0.05 & log2FoldChange < 0  ~ "Down",
+      TRUE                                             ~ "NS"
+    )
+  )
+Basic Volcano Plot: 
+p <- ggplot(res_df,
+            aes(x = log2FoldChange, y = neglog10padj)) +
+  geom_point(aes(color = sig_class),
+             alpha = 0.7, size = 1.8) +
+  geom_vline(xintercept = c(-1,1), linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  scale_color_manual(values = c(
+    Up = "red",
+    Down = "blue",
+    NS = "grey70"
+  )) +
+  labs(
+    title = "Volcano Plot: minSym vs R7A",
+    x = "log2 Fold Change (minSym / R7A)",
+    y = "-log10(adjusted p-value)",
+    color = "Expression"
+  ) +
+  theme_classic()
+
+print(p)
+
+ggsave("Volcano_minSym_vs_R7A.png",
+       p, width = 8, height = 6, dpi = 300)
+
+Label Top Genes, if needed:
+top_labels <- res_df %>%
+  filter(padj < 0.05) %>%
+  arrange(padj) %>%
+  slice(1:20)
+
+p + geom_text_repel(
+  data = top_labels,
+  aes(label = gene_id),
+  size = 3,
+  max.overlaps = Inf
+)
