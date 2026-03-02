@@ -1,0 +1,93 @@
+suppressPackageStartupMessages({
+  library(DESeq2)
+  library(dplyr)
+  library(tibble)
+})
+
+# -----------------------------
+# 0) USER SETTINGS
+# -----------------------------
+ICE_START <- 5899896
+ICE_END   <- 6401770
+
+# DE thresholds (edit if you want)
+padj_cutoff <- 0.05
+lfc_cutoff  <- 1
+
+# Your annotation file (has coordinates)
+ann_file <- "DESeq2_results_annotated_Mesorhizobium_ICEdesc_geneNameReplaced.csv"
+
+# Output files
+out_all_ice <- "DESeq2_results_ALL_ICE_genes.csv"
+out_de_ice  <- "DESeq2_results_DE_ICE_genes_padj0.05_absLFC1.csv"
+
+stopifnot(file.exists(ann_file))
+stopifnot(exists("dds"))
+
+# -----------------------------
+# 1) DESeq2 results (minSymICE vs R7A)
+# -----------------------------
+res <- results(dds, contrast = c("condition", "minSymICE", "R7A"))
+
+res_df <- as.data.frame(res) %>%
+  rownames_to_column("gene_id") %>%
+  mutate(
+    gene_id = as.character(gene_id),
+    log2FoldChange = suppressWarnings(as.numeric(log2FoldChange)),
+    padj = suppressWarnings(as.numeric(padj)),
+    pvalue = suppressWarnings(as.numeric(pvalue))
+  )
+
+# -----------------------------
+# 2) Read annotation (ONLY needed columns; avoid collisions)
+# -----------------------------
+ann_keep <- read.csv(ann_file, stringsAsFactors = FALSE, check.names = FALSE) %>%
+  transmute(
+    gene_id    = as.character(gene_id),
+    gene_name  = as.character(gene_name),
+    gene_start = suppressWarnings(as.numeric(gene_start)),
+    gene_end   = suppressWarnings(as.numeric(gene_end)),
+    gene_strand = if ("gene_strand" %in% names(.)) as.character(gene_strand) else NA_character_,
+    gene_chr    = if ("gene_chr" %in% names(.)) as.character(gene_chr) else NA_character_
+  ) %>%
+  distinct(gene_id, .keep_all = TRUE)
+
+# -----------------------------
+# 3) Join + ICE coordinate filter
+# -----------------------------
+ice_tbl <- res_df %>%
+  left_join(ann_keep, by = "gene_id") %>%
+  filter(
+    !is.na(gene_start), !is.na(gene_end),
+    gene_end >= ICE_START,
+    gene_start <= ICE_END
+  ) %>%
+  mutate(
+    # safe padj for any downstream plotting
+    padj_plot = ifelse(is.na(padj), NA, ifelse(padj == 0, 1e-300, padj)),
+    neglog10padj = -log10(padj_plot)
+  )
+
+cat("ICE genes (by coordinates):", nrow(ice_tbl), "\n")
+
+# Save ALL genes in ICE region (with DESeq2 stats)
+write.csv(ice_tbl, out_all_ice, row.names = FALSE)
+cat("Saved:", out_all_ice, "\n")
+
+# -----------------------------
+# 4) Keep only DE genes in ICE region
+# -----------------------------
+de_ice_tbl <- ice_tbl %>%
+  filter(
+    !is.na(padj),
+    padj < padj_cutoff,
+    !is.na(log2FoldChange),
+    abs(log2FoldChange) >= lfc_cutoff
+  ) %>%
+  arrange(padj, desc(abs(log2FoldChange)))
+
+cat("DE ICE genes (padj < ", padj_cutoff,
+    " & |LFC| >= ", lfc_cutoff, "): ", nrow(de_ice_tbl), "\n", sep = "")
+
+write.csv(de_ice_tbl, out_de_ice, row.names = FALSE)
+cat("Saved:", out_de_ice, "\n")
